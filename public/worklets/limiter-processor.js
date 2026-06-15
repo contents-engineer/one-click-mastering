@@ -36,7 +36,9 @@ function createLimiter(opts) {
     1,
     Math.round(((opts.lookaheadMs ?? 1.5) / 1000) * sampleRate)
   );
-  let attackCoef = coefFromMs(opts.attackMs ?? 1, sampleRate);
+  // `attackMs` is accepted for API/automation compatibility but intentionally
+  // unused: the look-ahead window-minimum below gives anticipated (click-free)
+  // attack on its own — the gain is fully reduced before the peak is emitted.
   let releaseCoef = coefFromMs(opts.releaseMs ?? 50, sampleRate);
 
   let delayL = new Float32Array(lookaheadSamples);
@@ -46,16 +48,38 @@ function createLimiter(opts) {
   const histR = new Float32Array(OS_TAPS);
   let env = 1;
 
+  // Monotonic (ascending) ring-buffer deque of the target gains across the
+  // look-ahead window. `env` tracks the window MINIMUM with instant attack and
+  // smoothed release, so the gain is already reduced before any inter-sample
+  // (true) peak in the window reaches the delayed output. This controls the
+  // TRUE peak, not just the sample peak; the per-sample clamp below is only a
+  // belt-and-braces safety. (Previously a one-pole attack lagged the peaks, so
+  // the clamp did the work and inter-sample peaks rode over the ceiling.)
+  let dqVal = new Float32Array(lookaheadSamples + 1);
+  let dqIdx = new Float64Array(lookaheadSamples + 1);
+  let dqHead = 0;
+  let dqTail = 0;
+  let dqCount = 0;
+  let sampleIdx = 0;
+
   function rebuildDelay(newLen) {
     if (newLen === lookaheadSamples) return;
     lookaheadSamples = newLen;
     delayL = new Float32Array(lookaheadSamples);
     delayR = new Float32Array(lookaheadSamples);
+    dqVal = new Float32Array(lookaheadSamples + 1);
+    dqIdx = new Float64Array(lookaheadSamples + 1);
     writeIdx = 0;
+    dqHead = 0;
+    dqTail = 0;
+    dqCount = 0;
+    sampleIdx = 0;
+    env = 1;
   }
 
   function processBlock(inL, inR, outL, outR, frames) {
     let minGain = 1;
+    const cap = lookaheadSamples + 1;
     for (let i = 0; i < frames; i++) {
       const sL = inL[i];
       const sR = inR[i];
@@ -81,8 +105,23 @@ function createLimiter(opts) {
         if (aR > peak) peak = aR;
       }
       const target = peak > ceilingLin ? ceilingLin / peak : 1;
-      if (target < env) env = target + (env - target) * attackCoef;
-      else env = target + (env - target) * releaseCoef;
+
+      // sliding-window minimum of the target gain over the look-ahead window
+      while (dqCount > 0 && dqVal[(dqTail - 1 + cap) % cap] >= target) {
+        dqTail = (dqTail - 1 + cap) % cap;
+        dqCount--;
+      }
+      dqVal[dqTail] = target;
+      dqIdx[dqTail] = sampleIdx;
+      dqTail = (dqTail + 1) % cap;
+      dqCount++;
+      while (dqCount > 0 && dqIdx[dqHead] <= sampleIdx - lookaheadSamples) {
+        dqHead = (dqHead + 1) % cap;
+        dqCount--;
+      }
+      const windowMin = dqVal[dqHead];
+      if (windowMin < env) env = windowMin; // instant attack to the anticipated minimum
+      else env = windowMin + (env - windowMin) * releaseCoef; // smoothed release
       if (env < minGain) minGain = env;
 
       const dL = delayL[writeIdx];
@@ -99,17 +138,18 @@ function createLimiter(opts) {
       else if (oR < -ceilingLin) oR = -ceilingLin;
       outL[i] = oL;
       outR[i] = oR;
+      sampleIdx++;
     }
     return minGain > 0 ? 20 * Math.log10(minGain) : -120;
   }
 
   function setParams(p) {
     if (p.ceilingDb != null) ceilingLin = dbToLin(p.ceilingDb);
-    if (p.attackMs != null) attackCoef = coefFromMs(p.attackMs, sampleRate);
     if (p.releaseMs != null) releaseCoef = coefFromMs(p.releaseMs, sampleRate);
     if (p.lookaheadMs != null) {
       rebuildDelay(Math.max(1, Math.round((p.lookaheadMs / 1000) * sampleRate)));
     }
+    // p.attackMs intentionally ignored — see note at the top of createLimiter.
   }
 
   function reset() {
@@ -119,6 +159,10 @@ function createLimiter(opts) {
     histR.fill(0);
     writeIdx = 0;
     env = 1;
+    dqHead = 0;
+    dqTail = 0;
+    dqCount = 0;
+    sampleIdx = 0;
   }
 
   return { processBlock, setParams, reset };

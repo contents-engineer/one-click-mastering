@@ -10,8 +10,6 @@ import type { ToneEq } from './presets'
 const HEADROOM_PAD = 0.5 // pm
 export const MAX_MAKEUP_DB = 18 // $c
 export const CLIPPER_THRESHOLD_DB = -3 // Uc
-const USER_MAKEUP_PAD = 1.5 // hm
-const USER_MAKEUP_MAX = 6 // gm
 
 // Multiband defaults: timing/knee when a preset supplies its own mb thresholds.
 const MB_TIMING = [
@@ -78,29 +76,30 @@ export function buildEqBands(tone: ToneEq): EqBand[] {
   return bands
 }
 
-/** auto makeup gain (`mm`), headroom mode. */
+/**
+ * Auto makeup gain (`mm`).
+ *  - 'target'   : normalize TO the LUFS target (the deficit), attenuating
+ *                 already-loud sources too; the true-peak limiter guards the
+ *                 ceiling. This is the default — it lands the master ON the
+ *                 preset target (−14 LUFS for streaming) rather than pushing it
+ *                 toward the peak ceiling.
+ *  - 'headroom' : legacy loudness-maximizer that fills the available peak
+ *                 headroom (kept for reference; no longer the default).
+ */
 function autoMakeup(
   lufsI: number,
   truePeakDb: number,
   targetLufs: number,
   ceilingDb: number,
   clipperDrive: number,
-  mode: 'headroom' | 'target' = 'headroom',
+  mode: 'headroom' | 'target' = 'target',
 ): number {
   if (!isFinite(lufsI)) return 0
   const deficit = targetLufs - lufsI
-  if (mode === 'target') return Math.max(0, Math.min(MAX_MAKEUP_DB, deficit))
+  if (mode === 'target') return Math.max(-MAX_MAKEUP_DB, Math.min(MAX_MAKEUP_DB, deficit))
   const tp = isFinite(truePeakDb) ? truePeakDb : 0
   const headroom = ceilingDb - tp + clipperDrive + HEADROOM_PAD
   return Math.max(0, Math.min(MAX_MAKEUP_DB, Math.min(deficit, headroom)))
-}
-
-/** user makeup gain default (`vm`). */
-function userMakeup(a: LoudnessAnalysis | null, autoMakeupDb: number, ceilingDb: number, clipperDrive: number): number {
-  if (!a || !isFinite(a.truePeakDb)) return 0
-  const proj = a.truePeakDb + autoMakeupDb - clipperDrive
-  const v = ceilingDb - proj + USER_MAKEUP_PAD
-  return Math.max(0, Math.min(USER_MAKEUP_MAX, v))
 }
 
 /** clipper drive (`ym`). */
@@ -129,7 +128,7 @@ export function buildChain(
     : 0
   const drive = clipperMode ? clipperDriveGain(analysis!.truePeakDb, CLIPPER_THRESHOLD_DB, baseDrive) : 0
   const auto = analysis
-    ? autoMakeup(analysis.lufsI, analysis.truePeakDb, targetLufs, ceilingDb, drive, 'headroom')
+    ? autoMakeup(analysis.lufsI, analysis.truePeakDb, targetLufs, ceilingDb, drive, 'target')
     : 0
   const autoClamped = Math.max(-18, Math.min(18, auto))
 
@@ -170,8 +169,12 @@ export function buildChain(
       autoRecommended: !!clipperMode,
     },
     autoMakeupDb: autoClamped,
-    userMakeupDb: analysis ? userMakeup(analysis, autoClamped, ceilingDb, drive) : 1.68,
+    // Loudness "드라이브" fader starts neutral (0 dB): the auto makeup above
+    // already lands the master on the target LUFS. Pushing the fader up makes it
+    // louder than the streaming standard. (Previously this was auto-filled to the
+    // peak ceiling → ~+2.6 dB overshoot, i.e. ≈ −9 LUFS instead of −14.)
+    userMakeupDb: 0,
     limiter: { bypassed: false, ceiling: ceilingDb, release: 0.05, lookaheadMs: 1.5, attackMs: 1 },
-    normalizeMode: 'headroom',
+    normalizeMode: 'target',
   }
 }
