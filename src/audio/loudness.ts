@@ -178,5 +178,14 @@ export async function analyzeLoudness(buffer: AudioBuffer): Promise<LoudnessAnal
   return { lufsI, peakDb, truePeakDb: truePeak, crestDb, transientDensity: transient }
 }
 
+/**
+ * Integrated LUFS only (BS.1770, 48 kHz K-weighting + gating) — same measurement
+ * as `analyzeLoudness` but without the peak/transient work. Used by the offline
+ * render for closed-loop loudness normalization to the target.
+ */
+export async function integratedLufsOf(buffer: AudioBuffer): Promise<number> {
+  return integratedLufs(await renderKWeighted(buffer))
+}
+
 /** Block mean-square → LUFS, exported for the realtime meter. */
 export { lk as blockLufs }

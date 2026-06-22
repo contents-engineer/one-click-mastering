@@ -6,6 +6,7 @@
  */
 import { createLimiter, dbToLin } from './limiterCore'
 import { applyDeHarsh } from './deharshCore'
+import { integratedLufsOf } from './loudness'
 import type { MasteringChain } from './types'
 
 const BLOCK = 128
@@ -159,13 +160,28 @@ export async function renderMastered(buffer: AudioBuffer, chain: MasteringChain)
     runLimiterPass(data, clip, dbToLin(chain.peakStage.driveDb))
   }
 
-  // Makeup gain (linear).
-  const makeup = dbToLin(chain.autoMakeupDb + chain.comp.makeup + chain.userMakeupDb)
-  if (makeup !== 1) {
-    for (const ch of data) for (let i = 0; i < ch.length; i++) ch[i] *= makeup
+  const applyGainDb = (db: number) => {
+    if (db === 0) return
+    const g = dbToLin(db)
+    for (const ch of data) for (let i = 0; i < ch.length; i++) ch[i] *= g
   }
 
-  // True-peak limiter.
+  // ---- Loudness normalization (closed-loop / 2-pass) ----
+  // The chain above (EQ / multiband / glue comp / de-harsh / clipper) shifts the
+  // integrated loudness in ways an input-based makeup gain can't predict — apply
+  // a fixed `target − inputLUFS` gain and the export drifts off target (e.g. lands
+  // at ~−12 instead of −14, which then gets turned down + re-normalized by the
+  // platform). So we MEASURE the processed signal, apply the gain that lands it on
+  // target, limit true peak, then fine-trim the residual the limiter introduces.
+  // The drive fader (userMakeupDb) is an offset above/below the platform target.
+  const desiredLufs = chain.targetLufs + chain.userMakeupDb
+
+  const shapedLufs = await integratedLufsOf(rendered)
+  if (isFinite(shapedLufs)) {
+    applyGainDb(Math.max(-24, Math.min(24, desiredLufs - shapedLufs)))
+  }
+
+  // True-peak limiter (holds the ceiling).
   if (!chain.limiter.bypassed) {
     const lim = createLimiter({
       sampleRate: rendered.sampleRate,
@@ -175,11 +191,18 @@ export async function renderMastered(buffer: AudioBuffer, chain: MasteringChain)
       releaseMs: chain.limiter.release * 1000,
     })
     runLimiterPass(data, lim, 1)
+
+    // Fine-trim: the limiter shifts loudness. Correct the residual, but ONLY
+    // downward — attenuation can't push true peak back over the ceiling, whereas
+    // a boost could. A master left slightly under target is platform-safe.
+    const limitedLufs = await integratedLufsOf(rendered)
+    if (isFinite(limitedLufs) && limitedLufs > desiredLufs) {
+      applyGainDb(desiredLufs - limitedLufs)
+    }
   }
 
   // Safety gain −0.1 dB.
-  const safety = dbToLin(-0.1)
-  for (const ch of data) for (let i = 0; i < ch.length; i++) ch[i] *= safety
+  applyGainDb(-0.1)
 
   return rendered
 }

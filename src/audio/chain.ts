@@ -168,11 +168,13 @@ export function buildChain(
       driveDb: drive,
       autoRecommended: !!clipperMode,
     },
+    targetLufs,
     autoMakeupDb: autoClamped,
-    // Loudness "드라이브" fader starts neutral (0 dB): the auto makeup above
-    // already lands the master on the target LUFS. Pushing the fader up makes it
-    // louder than the streaming standard. (Previously this was auto-filled to the
-    // peak ceiling → ~+2.6 dB overshoot, i.e. ≈ −9 LUFS instead of −14.)
+    // Loudness "드라이브" fader starts neutral (0 dB). The export normalizes to
+    // `targetLufs` closed-loop (offlineRender measures the processed signal and
+    // trims to target), so the fader is an offset ABOVE/below the platform target
+    // — push it up only to go louder than the standard. (autoMakeupDb is the
+    // open-loop estimate used by the live preview, which can't measure 2-pass.)
     userMakeupDb: 0,
     limiter: { bypassed: false, ceiling: ceilingDb, release: 0.05, lookaheadMs: 1.5, attackMs: 1 },
     normalizeMode: 'target',

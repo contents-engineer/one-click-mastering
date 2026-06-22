@@ -54,6 +54,8 @@ export interface MasteringChain {
     driveDb: number
     autoRecommended: boolean
   }
+  /** Target integrated loudness (LUFS) the export normalizes to (closed-loop). */
+  targetLufs: number
   autoMakeupDb: number
   userMakeupDb: number
   limiter: {
