@@ -199,7 +199,7 @@ Main container: `<main class="max-w-[920px] mx-auto px-7 py-8">`.
   4. Full measure (전체 측정): offline render → integrated LUFS + true-peak Before/After/Δ.
   5. **Advanced accordion (고급 설정)** — UNLOCKED (tiers removed): Auto-setup button (자동 설정), Peak tamer, EQ graph (draggable points, dblclick=0), Compressor (Threshold/Ratio/Attack/Release), Multiband, Limiter, Output format (16/24/32-bit + 디더), evidence panel.
   6. Download button: "현재 설정으로 WAV 다운로드" / "렌더링 중…" → re-render via `sf` at chosen bitDepth/dither.
-- **footer**: privacy line + "© 2026 Manex · 주코드(Zoochord) · 대표 주형찬 · 사업자등록번호 662-03-03053 · 통신판매업신고 제2026-화도수동-0303호 · 경기도 남양주시 수동면 송천2길 12-16 · jakejoo@zoochord.com".
+- **footer**: privacy line (브라우저 처리·서버 미전송 안내) + "© 2026 Manex". (원본의 사업자 등록정보·연락처는 클론에서 제외.)
 
 Drop zone copy: "AI음악 곡을 여기 놓아주세요" / "WAV · MP3 · M4A · FLAC · 60MB 이하 · 10분 이하" / "파일 선택" / "업로드 없이 브라우저에서 직접 처리됩니다. 파일이 서버로 전송되지 않습니다."
 
@@ -208,7 +208,7 @@ Drop zone copy: "AI음악 곡을 여기 놓아주세요" / "WAV · MP3 · M4A ·
 ---
 
 ## 7. REMOVE (backend) — do not implement
-Supabase consts/anon key; auth (`wt/hf/Dp/Fp/Pp`); OAuth (`Ii`, kakao/google); `/api/me`,`/api/usage`,`/api/checkout`; `/rest/v1/projects`, storage; `?project=` deeplink; `manex_pending_chain`; localStorage quota (`zoochord_manex_upload_count_v2` etc.); upload-counter UI; Save button; login-gate modal; tier gating → **unlock Advanced + Download unconditionally**. Optionally drop upgrade modal, pricing page, Labs teaser, account menu, curtain.js.
+백엔드 의존 기능은 클론에서 전부 제외한다: 로그인/OAuth, 프로젝트 저장 및 파일 스토리지, 사용량·업로드 카운트, 결제/티어 게이팅, 관련 API 호출·딥링크·localStorage 키, 업로드 카운터/저장 버튼/로그인 게이트 모달. 그 결과 고급 설정과 다운로드는 잠금 없이 항상 열어 둔다. (원본의 구체적인 서버 엔드포인트·키 등 역공학 메모는 의도적으로 기록하지 않음.)
 
 ---
 
